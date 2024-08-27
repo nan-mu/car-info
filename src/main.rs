@@ -1,5 +1,6 @@
 use clap::Parser;
-use influxdb::{Client, InfluxDbWriteable};
+use influxdb2::Client;
+use influxdb2_derive::WriteDataPoint;
 use std::env;
 use sysinfo::System;
 use tokio::time::{self, Duration};
@@ -7,15 +8,19 @@ use tokio::time::{self, Duration};
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    /// InfluxDB的地址
-    #[clap(short, long, default_value = "http://localhost:8086")]
-    influxdb_url: String,
+    /// InfluxDB的地址，格式为address:port
+    #[clap(short, long, default_value = "localhost:8086")]
+    db_host: String,
+
+    /// InfluxDB的组织
+    #[clap(short, long, default_value = "jsptb")]
+    org: String,
 
     /// 目标bucket
-    #[clap(short, long, default_value = "mydb")]
+    #[clap(short, long, default_value = "rust-test")]
     bucket: String,
 
-    /// 探测时间间隔
+    /// 采样时间间隔
     #[clap(short, long, default_value_t = 10)]
     interval: u64,
 }
@@ -26,8 +31,7 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 async fn main() {
     let args = Args::parse();
     let token = env::var("INFLUXDB_TOKEN").expect("缺少数据库token环境变量：INFLUXDB_TOKEN");
-    let client = Client::new(args.influxdb_url, args.bucket).with_token(token);
-
+    let client = Client::new(args.db_host, args.org, token);
     let interval = args.interval;
     tokio::spawn(async move {
         let mut interval_timer = time::interval(Duration::from_secs(interval));
@@ -46,32 +50,37 @@ async fn main() {
 }
 
 async fn get_process_info(sys: &System, pid: sysinfo::Pid) -> Result<ProcessInfo> {
+    // 这里强制使用i64是因为数据库存储的是i64
     let process = sys.process(pid).ok_or("错误的pid".to_string())?;
     Ok(ProcessInfo {
-        time: chrono::Local::now(),
+        time: chrono::Local::now()
+            .timestamp_nanos_opt()
+            .expect("时间戳已经超过了64位"),
         name: process.name().to_str().unwrap().to_string(),
-        cpu_usage: process.cpu_usage(),
-        total_written_bytes: process.disk_usage().total_written_bytes,
-        total_read_bytes: process.disk_usage().total_read_bytes,
-        virtual_memory: process.virtual_memory(),
+        cpu_usage: process.cpu_usage() as f64,
+        total_written_bytes: process.disk_usage().total_written_bytes as i64,
+        total_read_bytes: process.disk_usage().total_read_bytes as i64,
+        virtual_memory: process.virtual_memory() as i64,
         status: process.status().to_string(),
     })
 }
 
-#[derive(Debug, PartialEq, InfluxDbWriteable)]
+#[derive(Debug, WriteDataPoint)]
+#[measurement = "process_info"]
 struct ProcessInfo {
-    time: chrono::DateTime<chrono::Local>,
+    #[influxdb(timestamp)]
+    time: i64,
     /// 程序的名称
     #[influxdb(tag)]
     name: String,
     /// cpu使用率
-    cpu_usage: f32,
+    cpu_usage: f64,
     /// 内存写入总量
-    total_written_bytes: u64,
+    total_written_bytes: i64,
     /// 内存读取总量
-    total_read_bytes: u64,
+    total_read_bytes: i64,
     /// 虚拟内存使用量
-    virtual_memory: u64,
+    virtual_memory: i64,
     /// 状态
     status: String,
 }
