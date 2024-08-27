@@ -42,6 +42,6 @@ async fn main() {
     // 让主线程保持运行
     tokio::signal::ctrl_c()
         .await
-        .expect("Failed to listen for ctrl-c");
-    println!("Program interrupted, shutting down...");
+        .expect("监听ctrl-c退出信号失败");
+    println!("程序终端，退出");
 }
