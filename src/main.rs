@@ -1,6 +1,7 @@
 use clap::Parser;
-use influxdb::Client;
+use influxdb::{Client, InfluxDbWriteable};
 use std::env;
+use sysinfo::System;
 use tokio::time::{self, Duration};
 
 #[derive(Parser, Debug)]
@@ -18,6 +19,8 @@ struct Args {
     #[clap(short, long, default_value_t = 10)]
     interval: u64,
 }
+
+type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 
 #[tokio::main]
 async fn main() {
@@ -44,4 +47,35 @@ async fn main() {
         .await
         .expect("监听ctrl-c退出信号失败");
     println!("程序终端，退出");
+}
+
+async fn get_process_info(sys: System, pid: sysinfo::Pid) -> Result<ProcessInfo> {
+    let process = sys.process(pid).ok_or("错误的pid".to_string())?;
+    Ok(ProcessInfo {
+        time: chrono::Local::now(),
+        name: process.name().to_str().unwrap().to_string(),
+        cpu_usage: process.cpu_usage(),
+        total_written_bytes: process.disk_usage().total_written_bytes,
+        total_read_bytes: process.disk_usage().total_read_bytes,
+        virtual_memory: process.virtual_memory(),
+        status: process.status().to_string(),
+    })
+}
+
+#[derive(Debug, PartialEq, InfluxDbWriteable)]
+struct ProcessInfo {
+    time: chrono::DateTime<chrono::Local>,
+    /// 程序的名称
+    #[influxdb(tag)]
+    name: String,
+    /// cpu使用率
+    cpu_usage: f32,
+    /// 内存写入总量
+    total_written_bytes: u64,
+    /// 内存读取总量
+    total_read_bytes: u64,
+    /// 虚拟内存使用量
+    virtual_memory: u64,
+    /// 状态
+    status: String,
 }
