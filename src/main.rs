@@ -25,13 +25,9 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-
     let token = env::var("INFLUXDB_TOKEN").expect("缺少数据库token环境变量：INFLUXDB_TOKEN");
-
-    // 初始化 InfluxDB 客户端
     let client = Client::new(args.influxdb_url, args.bucket).with_token(token);
 
-    // 启动子线程，每隔固定时间插入数据
     let interval = args.interval;
     tokio::spawn(async move {
         let mut interval_timer = time::interval(Duration::from_secs(interval));
@@ -49,7 +45,7 @@ async fn main() {
     println!("程序终端，退出");
 }
 
-async fn get_process_info(sys: System, pid: sysinfo::Pid) -> Result<ProcessInfo> {
+async fn get_process_info(sys: &System, pid: sysinfo::Pid) -> Result<ProcessInfo> {
     let process = sys.process(pid).ok_or("错误的pid".to_string())?;
     Ok(ProcessInfo {
         time: chrono::Local::now(),
