@@ -6,6 +6,9 @@ edition = "2021"
 [dependencies]
 chrono = "0.4.38"
 clap = { version = "4.5.16", features = ["derive"] }
-influxdb = { version = "0.7.2", features = ["derive"] }
+influxdb2 = "0.5.2"
+influxdb2-derive = "0.1.1"
+influxdb2-structmap = "0.2.0"
+num-traits = "0.2.19"
 sysinfo = "0.31.3"
 tokio = { version = "1.39.3", features = ["full"] }
