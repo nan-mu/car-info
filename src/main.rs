@@ -1,35 +1,15 @@
-use clap::Parser;
+use clap::{builder, Command, Parser};
 use influxdb2::Client;
 use influxdb2_derive::WriteDataPoint;
 use std::env;
 use sysinfo::System;
 use tokio::time::{self, Duration};
 
-#[derive(Parser, Debug)]
-#[clap(author, version, about, long_about = None)]
-struct Args {
-    /// InfluxDB的地址，格式为address:port
-    #[clap(short, long, default_value = "localhost:8086")]
-    db_host: String,
-
-    /// InfluxDB的组织
-    #[clap(short, long, default_value = "jsptb")]
-    org: String,
-
-    /// 目标bucket
-    #[clap(short, long, default_value = "rust-test")]
-    bucket: String,
-
-    /// 采样时间间隔
-    #[clap(short, long, default_value_t = 10)]
-    interval: u64,
-}
-
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 
 #[tokio::main]
 async fn main() {
-    let args = Args::parse();
+    let args = ProcessInfo::parse();
     let token = env::var("INFLUXDB_TOKEN").expect("缺少数据库token环境变量：INFLUXDB_TOKEN");
     let client = Client::new(args.db_host, args.org, token);
     let interval = args.interval;
@@ -83,4 +63,42 @@ struct ProcessInfo {
     virtual_memory: i64,
     /// 状态
     status: String,
+}
+
+/// 同时也是所有的配置项
+#[derive(Parser, Debug, Clone)]
+#[clap(author, version, about, long_about = None)]
+struct Config {
+    /// InfluxDB的地址，格式为address:port
+    #[clap(short, long)]
+    db_host: Option<String>,
+
+    /// InfluxDB的组织
+    #[clap(short, long)]
+    org: Option<String>,
+
+    /// 目标bucket
+    #[clap(short, long)]
+    bucket: Option<String>,
+
+    /// 采样时间间隔
+    #[clap(short, long)]
+    interval: Option<u64>,
+
+    /// 待监控程序的pid，格式为pid1,pid2,pid3
+    #[clap(short, long, last = true)]
+    pids: Option<Vec<u64>>,
+}
+
+impl builder::TypedValueParser for Config {
+    type Value = Config;
+
+    fn parse_ref(
+        &self,
+        cmd: &Command,
+        arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> std::result::Result<Self::Value, String> {
+        todo!()
+    }
 }

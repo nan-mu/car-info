@@ -1,0 +1,14 @@
+# 采样时间间隔，单位秒
+interval = 5
+# 日志等级
+log_level = "debug"
+
+[influxdb2]
+host = "localhost"
+port = "8086"
+org = "jsptb"
+
+# 这是检测目标的匹配规则，目前只能通过pid和进程名称监控
+[target]
+pid = [111]
+name = ["car-info"]
