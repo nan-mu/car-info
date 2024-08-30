@@ -1,8 +1,8 @@
-use clap::{builder, Command, Parser};
+use clap::Parser;
 use influxdb2::Client;
 use influxdb2_derive::WriteDataPoint;
 use std::env;
-use sysinfo::System;
+use sysinfo::{ProcessRefreshKind, System};
 use tokio::time::{self, Duration};
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -13,6 +13,21 @@ async fn main() {
     let token = env::var("INFLUXDB_TOKEN").expect("缺少数据库token环境变量：INFLUXDB_TOKEN");
     let client = Client::new(args.db_host, args.org, token);
     let interval = args.interval;
+
+    tokio::spawn(async move {
+        let mut system = System::new();
+
+        // 刷新所有进程的信息，但只关注
+        system.refresh_processes_specifics(
+            sysinfo::ProcessesToUpdate::All,
+            ProcessRefreshKind::new()
+                .with_cpu()
+                .with_disk_usage()
+                .with_user(sysinfo::UpdateKind::OnlyIfNotSet)
+                .with_memory(),
+        );
+    });
+
     tokio::spawn(async move {
         let mut interval_timer = time::interval(Duration::from_secs(interval));
 
@@ -66,7 +81,7 @@ struct ProcessInfo {
 }
 
 /// 同时也是所有的配置项
-#[derive(Parser, Debug, Clone)]
+#[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Config {
     /// InfluxDB的地址，格式为address:port
@@ -87,18 +102,5 @@ struct Config {
 
     /// 待监控程序的pid，格式为pid1,pid2,pid3
     #[clap(short, long, last = true)]
-    pids: Option<Vec<u64>>,
-}
-
-impl builder::TypedValueParser for Config {
-    type Value = Config;
-
-    fn parse_ref(
-        &self,
-        cmd: &Command,
-        arg: Option<&clap::Arg>,
-        value: &std::ffi::OsStr,
-    ) -> std::result::Result<Self::Value, String> {
-        todo!()
-    }
+    pids: Vec<u64>,
 }
