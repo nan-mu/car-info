@@ -1,35 +1,34 @@
 use clap::Parser;
-use influxdb2::Client;
 use influxdb2_derive::WriteDataPoint;
-use std::env;
-use sysinfo::{ProcessRefreshKind, System};
+use priority_queue::PriorityQueue;
+use std::{
+    cmp::Reverse,
+    collections::{BinaryHeap, VecDeque},
+};
+use sysinfo::{ProcessRefreshKind, System, UpdateKind};
 use tokio::time::{self, Duration};
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 
 #[tokio::main]
 async fn main() {
-    let args = ProcessInfo::parse();
-    let token = env::var("INFLUXDB_TOKEN").expect("缺少数据库token环境变量：INFLUXDB_TOKEN");
-    let client = Client::new(args.db_host, args.org, token);
-    let interval = args.interval;
-
     tokio::spawn(async move {
         let mut system = System::new();
 
-        // 刷新所有进程的信息，但只关注
+        // 首先获取cpu占用总量前20的进程
         system.refresh_processes_specifics(
             sysinfo::ProcessesToUpdate::All,
             ProcessRefreshKind::new()
                 .with_cpu()
                 .with_disk_usage()
-                .with_user(sysinfo::UpdateKind::OnlyIfNotSet)
-                .with_memory(),
+                .with_user(UpdateKind::OnlyIfNotSet)
+                .with_memory() // 对应disk_usage函数
+                .with_exe(UpdateKind::OnlyIfNotSet), // 对应name函数
         );
     });
 
     tokio::spawn(async move {
-        let mut interval_timer = time::interval(Duration::from_secs(interval));
+        let mut interval_timer = time::interval(Duration::from_secs(5));
 
         loop {
             interval_timer.tick().await;
@@ -58,6 +57,34 @@ async fn get_process_info(sys: &System, pid: sysinfo::Pid) -> Result<ProcessInfo
         virtual_memory: process.virtual_memory() as i64,
         status: process.status().to_string(),
     })
+}
+
+/// 得到cpu占用前20进程的pid
+async fn get_top_20_cpu_process() -> Vec<sysinfo::Pid> {
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::All,
+        ProcessRefreshKind::new().with_cpu(),
+    );
+
+    let mut heap = PriorityQueue::with_capacity(20);
+
+    sys.processes().iter().for_each(|(pid, process)| {
+        let cpu_usage = process.cpu_usage();
+        // 相信它不会给出一个逆天cpu使用率。当然多核的情况之后再考虑
+        assert!(cpu_usage >= 0.0 && cpu_usage <= 1.0);
+        let cpu_usage = (cpu_usage * 100.0) as u8;
+        if heap.len() < 20 {
+            heap.push(pid, Reverse(cpu_usage));
+        } else if let Some((_, min_usage)) = heap.peek() {
+            if cpu_usage > min_usage.0 {
+                heap.pop();
+                heap.push(pid, Reverse(cpu_usage));
+            }
+        }
+    });
+
+    heap.into_iter().map(|(&pid, _)| pid).collect()
 }
 
 #[derive(Debug, WriteDataPoint)]
@@ -103,4 +130,36 @@ struct Config {
     /// 待监控程序的pid，格式为pid1,pid2,pid3
     #[clap(short, long, last = true)]
     pids: Vec<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_get_top_20_cpu_process() {
+        let process = get_top_20_cpu_process().await;
+        println!("{:?}", process);
+    }
+
+    #[test]
+    fn test_priority_queue_resize() {
+        let mut queue = PriorityQueue::with_capacity(5);
+
+        // Push 5 elements into the queue
+        queue.push(1, Reverse(10));
+        queue.push(2, Reverse(20));
+        queue.push(3, Reverse(30));
+        queue.push(4, Reverse(40));
+        queue.push(5, Reverse(50));
+
+        // The queue should have resized automatically
+        assert_eq!(queue.capacity(), 5);
+        queue.push(6, Reverse(70));
+
+        // Print the entire queue
+        for x in queue.into_sorted_vec() {
+            println!("{:?}", x);
+        }
+    }
 }
