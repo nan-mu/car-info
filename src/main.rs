@@ -1,40 +1,55 @@
 use clap::Parser;
 use influxdb2_derive::WriteDataPoint;
 use priority_queue::PriorityQueue;
-use std::{
-    cmp::Reverse,
-    collections::{BinaryHeap, VecDeque},
-};
-use sysinfo::{ProcessRefreshKind, System, UpdateKind};
+use std::cmp::Reverse;
+use sysinfo::{CpuRefreshKind, ProcessRefreshKind, RefreshKind, System};
 use tokio::time::{self, Duration};
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 
 #[tokio::main]
 async fn main() {
-    tokio::spawn(async move {
-        let mut system = System::new();
+    // 得到一些硬件相关的参数
+    let mut system =
+        System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
+    // 文档里说要开始获得准确的 CPU 使用率，进程需要刷新两次。
+    // 这里的MINIMUM_CPU_UPDATE_INTERVAL是刷新的最小间隔时间
+    std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+    // Refresh CPUs again to get actual value.
+    system.refresh_cpu_usage();
+    let cpu_num = system.cpus().len();
 
-        // 首先获取cpu占用总量前20的进程
-        system.refresh_processes_specifics(
-            sysinfo::ProcessesToUpdate::All,
-            ProcessRefreshKind::new()
-                .with_cpu()
-                .with_disk_usage()
-                .with_user(UpdateKind::OnlyIfNotSet)
-                .with_memory() // 对应disk_usage函数
-                .with_exe(UpdateKind::OnlyIfNotSet), // 对应name函数
-        );
-    });
-
-    tokio::spawn(async move {
-        let mut interval_timer = time::interval(Duration::from_secs(5));
-
-        loop {
-            interval_timer.tick().await;
-            todo!("插入查询数据");
-        }
-    });
+    // TODO: 之后从配置文件中读取以何种方式得到关注程序的pid
+    // 现在先抽前20个
+    let target_pids = get_top_20_cpu_process().await;
+    let chunks_size = (target_pids.len() + cpu_num - 1) / cpu_num;
+    assert!(chunks_size * cpu_num >= target_pids.len());
+    // REVIEW: 这里确实有点抽象，我想要能move到spawn里面，有更高效的方法吗
+    let target_pid_vecs = target_pids
+        .chunks(chunks_size)
+        .map(|pids| pids.iter().map(|&pid| pid).collect::<Vec<sysinfo::Pid>>())
+        .collect::<Vec<Vec<sysinfo::Pid>>>();
+    for pids in target_pid_vecs {
+        // debug!("pids: {:?}", pids);
+        // 之后这一层会抽象到函数里
+        tokio::spawn(async move {
+            let sys = System::new();
+            let mut interval_timer = time::interval(Duration::from_secs(5));
+            loop {
+                interval_timer.tick().await;
+                for pid in &pids {
+                    match get_process_info(&sys, *pid).await {
+                        Ok(info) => {
+                            println!("{:?}", info);
+                        }
+                        Err(e) => {
+                            eprintln!("获取进程信息失败: {}", e);
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     // 让主线程保持运行
     tokio::signal::ctrl_c()
@@ -43,6 +58,7 @@ async fn main() {
     println!("程序终端，退出");
 }
 
+/// 根据Pid获取信息
 async fn get_process_info(sys: &System, pid: sysinfo::Pid) -> Result<ProcessInfo> {
     // 这里强制使用i64是因为数据库存储的是i64
     let process = sys.process(pid).ok_or("错误的pid".to_string())?;
@@ -66,9 +82,16 @@ async fn get_top_20_cpu_process() -> Vec<sysinfo::Pid> {
         sysinfo::ProcessesToUpdate::All,
         ProcessRefreshKind::new().with_cpu(),
     );
-
+    // 文档里说要开始获得准确的 CPU 使用率，进程需要刷新两次。
+    // 这里的MINIMUM_CPU_UPDATE_INTERVAL是刷新的最小间隔时间
+    tokio::time::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL).await;
     let mut heap = PriorityQueue::with_capacity(20);
+    sys.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::All,
+        ProcessRefreshKind::new().with_cpu(),
+    );
 
+    // 最小堆排序
     sys.processes().iter().for_each(|(pid, process)| {
         let cpu_usage = process.cpu_usage();
         // 相信它不会给出一个逆天cpu使用率。当然多核的情况之后再考虑
@@ -146,20 +169,16 @@ mod tests {
     fn test_priority_queue_resize() {
         let mut queue = PriorityQueue::with_capacity(5);
 
-        // Push 5 elements into the queue
         queue.push(1, Reverse(10));
         queue.push(2, Reverse(20));
         queue.push(3, Reverse(30));
         queue.push(4, Reverse(40));
         queue.push(5, Reverse(50));
 
-        // The queue should have resized automatically
         assert_eq!(queue.capacity(), 5);
         queue.push(6, Reverse(70));
 
-        // Print the entire queue
-        for x in queue.into_sorted_vec() {
-            println!("{:?}", x);
-        }
+        // 超过初始化的容量会自动扩容
+        assert_eq!(queue.into_iter().count(), 6);
     }
 }
