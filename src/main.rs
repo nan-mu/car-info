@@ -94,9 +94,8 @@ async fn get_top_20_cpu_process() -> Vec<sysinfo::Pid> {
     // 最小堆排序
     sys.processes().iter().for_each(|(pid, process)| {
         let cpu_usage = process.cpu_usage();
-        // 相信它不会给出一个逆天cpu使用率。当然多核的情况之后再考虑
-        assert!(cpu_usage >= 0.0 && cpu_usage <= 1.0);
-        let cpu_usage = (cpu_usage * 100.0) as u8;
+        assert!(cpu_usage >= 0.0);
+        let cpu_usage = (cpu_usage * 100.0) as u32;
         if heap.len() < 20 {
             heap.push(pid, Reverse(cpu_usage));
         } else if let Some((_, min_usage)) = heap.peek() {
