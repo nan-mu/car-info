@@ -6,9 +6,11 @@ edition = "2021"
 [dependencies]
 chrono = "0.4.38"
 clap = { version = "4.5.16", features = ["derive"] }
+env_logger = "0.11.5"
 influxdb2 = "0.5.2"
 influxdb2-derive = "0.1.1"
 influxdb2-structmap = "0.2.0"
+log = "0.4.22"
 num-traits = "0.2.19"
 priority-queue = "2.1.0"
 sysinfo = "0.31.3"

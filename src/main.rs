@@ -1,5 +1,6 @@
 use clap::Parser;
 use influxdb2_derive::WriteDataPoint;
+use log::debug;
 use priority_queue::PriorityQueue;
 use std::cmp::Reverse;
 use sysinfo::{CpuRefreshKind, ProcessRefreshKind, RefreshKind, System};
@@ -9,6 +10,9 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 
 #[tokio::main]
 async fn main() {
+    env_logger::Builder::from_default_env()
+        .filter_level(log::LevelFilter::Debug)
+        .init();
     // 得到一些硬件相关的参数
     let mut system =
         System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
@@ -30,7 +34,7 @@ async fn main() {
         .map(|pids| pids.iter().map(|&pid| pid).collect::<Vec<sysinfo::Pid>>())
         .collect::<Vec<Vec<sysinfo::Pid>>>();
     for pids in target_pid_vecs {
-        // debug!("pids: {:?}", pids);
+        debug!("pids: {:?}", pids);
         // 之后这一层会抽象到函数里
         tokio::spawn(async move {
             let sys = System::new();
